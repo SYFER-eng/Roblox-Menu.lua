@@ -28,10 +28,10 @@ local Settings = {
     ESPEnabled = true,  
     BoxESP = true,  
     BoneESP = true,  
-    FullBodyESP = true, -- Enable full body ESP by default
     ShowFOV = true,  
     RainbowESP = false,  
-    ESPColor = Color3.fromRGB(255, 255, 255)  
+    ESPColor = Color3.fromRGB(255, 255, 255),  
+    AnapLinesEnabled = false -- Anap line toggle
 }  
 
 -- Create Tabs  
@@ -80,13 +80,14 @@ ESPSection:NewToggle("Bone ESP", "Toggle bone ESP around players", function(stat
     Settings.BoneESP = state  
 end)  
 
-ESPSection:NewToggle("Full Body ESP", "Toggle full body ESP around players", function(state)  
-    Settings.FullBodyESP = state  
-end)  
-
 ESPSection:NewToggle("Rainbow ESP", "Dynamic color for ESP", function(state)  
     Settings.RainbowESP = state  
 end)  
+
+-- Anap Line Toggle
+ESPSection:NewToggle("Enable Anap Lines", "Draw lines from bottom of the screen to player heads", function(state)  
+    Settings.AnapLinesEnabled = state  
+end)
 
 -- Function to find the first available part  
 local function FindFirstAvailablePart(character, partNames)  
@@ -154,8 +155,7 @@ local function UpdateESP()
                 if not ESPObjects[player] then  
                     ESPObjects[player] = {  
                         Box = Drawing.new("Square"),  
-                        BoneDots = {},  
-                        FullBodyLines = {} -- Initialize for full body ESP
+                        BoneDots = {}  
                     }  
 
                     ESPObjects[player].Box.Thickness = 2  
@@ -198,6 +198,7 @@ local function UpdateESP()
                                     -- Remove old boneDot if exists
                                     if ESPObjects[player].BoneDots[boneName] then
                                         ESPObjects[player].BoneDots[boneName]:Remove()
+                                        ESPObjects[player].BoneDots[boneName] = nil -- Clear reference
                                     end
 
                                     -- Create a new bone overlay
@@ -213,77 +214,48 @@ local function UpdateESP()
                                 end
                             end
                         end
-                    end
-
-                    -- Full Body ESP
-                    if Settings.FullBodyESP then
-                        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-                        if humanoidRootPart then
-                            local joints = {
-                                {character:FindFirstChild("Head"), "Head"},
-                                {character:FindFirstChild("Torso"), "Torso"},
-                                {character:FindFirstChild("Left Arm"), "Left Arm"},
-                                {character:FindFirstChild("Right Arm"), "Right Arm"},
-                                {character:FindFirstChild("Left Leg"), "Left Leg"},
-                                {character:FindFirstChild("Right Leg"), "Right Leg"},
-                            }
-
-                            -- Clear existing lines
-                            for _, line in pairs(ESPObjects[player].FullBodyLines) do
-                                line:Remove()
-                            end
-                            ESPObjects[player].FullBodyLines = {}
-
-                            for _, joint in ipairs(joints) do
-                                local part, partName = joint[1], joint[2]
-                                if part then
-                                    local vector, onScreen = Camera:WorldToViewportPoint(part.Position)
-                                    if onScreen then
-                                        local line = Drawing.new("Line")
-                                        line.From = Vector2.new(vector.X, vector.Y)
-
-                                        -- Get the next joint for connecting lines
-                                        local nextJoint = nil
-                                        if partName == "Head" then
-                                            nextJoint = character:FindFirstChild("Torso")
-                                        elseif partName == "Torso" then
-                                            nextJoint = character:FindFirstChild("Left Arm") or character:FindFirstChild("Right Arm") or character:FindFirstChild("Left Leg") or character:FindFirstChild("Right Leg")
-                                        elseif partName == "Left Arm" then
-                                            nextJoint = character:FindFirstChild("Left Leg")
-                                        elseif partName == "Right Arm" then
-                                            nextJoint = character:FindFirstChild("Right Leg")
-                                        elseif partName == "Left Leg" then
-                                            nextJoint = character:FindFirstChild("Right Leg") -- Connect legs
-                                        end
-
-                                        if nextJoint then
-                                            local nextVector, nextOnScreen = Camera:WorldToViewportPoint(nextJoint.Position)
-                                            if nextOnScreen then
-                                                line.To = Vector2.new(nextVector.X, nextVector.Y)
-                                                line.Color = espColor
-                                                line.Thickness = 2
-                                                line.Visible = true
-                                                table.insert(ESPObjects[player].FullBodyLines, line) -- Store the line
-                                            end
-                                        end
-                                    end
-                                end
-                            end
+                    else
+                        -- If Bone ESP is disabled, remove all bone dots
+                        for _, boneDot in pairs(ESPObjects[player].BoneDots) do
+                            boneDot:Remove()
                         end
+                        ESPObjects[player].BoneDots = {} -- Clear all bone dots
                     end
+
                 else  
                     ESPObjects[player].Box.Visible = false  
                     for _, boneDot in pairs(ESPObjects[player].BoneDots) do
                         boneDot.Visible = false
-                    end
-                    for _, line in pairs(ESPObjects[player].FullBodyLines) do
-                        line.Visible = false
                     end
                 end  
             end  
         end  
     end  
 end  
+
+-- Function to draw Anap Lines
+local function DrawAnapLines()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local character = player.Character
+            if character then
+                local head = character:FindFirstChild("Head")
+                if head then
+                    local headPosition, onScreen = Camera:WorldToViewportPoint(head.Position)
+                    if onScreen then
+                        local line = Drawing.new("Line")
+                        line.From = Vector2.new(headPosition.X, headPosition.Y)
+                        line.To = Vector2.new(headPosition.X, game:GetService("Workspace").CurrentCamera.ViewportSize.Y)  -- From head to bottom of the screen
+                        line.Thickness = 2
+                        line.Color = Color3.fromRGB(255, 0, 0)  -- Color of the line
+                        line.Visible = true
+                        line:Remove() -- Clean up the line after drawing
+                    end
+                end
+            end
+        end
+    end
+end
 
 -- Main Loop  
 RunService.RenderStepped:Connect(function()  
@@ -314,6 +286,23 @@ RunService.RenderStepped:Connect(function()
     end  
 
     UpdateESP()  
+
+    -- Reset ESP objects every 1ms
+    for _, player in pairs(Players:GetPlayers()) do  
+        if player ~= LocalPlayer and ESPObjects[player] then  
+            if ESPObjects[player].Box then 
+                ESPObjects[player].Box.Visible = false 
+            end
+            for _, boneDot in pairs(ESPObjects[player].BoneDots) do
+                boneDot.Visible = false
+            end
+        end  
+    end
+
+    -- Draw Anap Lines if enabled
+    if Settings.AnapLinesEnabled then
+        DrawAnapLines()
+    end
 end)  
 
 -- Toggle the menu visibility with the B key
@@ -330,9 +319,6 @@ Players.PlayerRemoving:Connect(function(player)
         ESPObjects[player].Box:Remove()  
         for _, boneDot in pairs(ESPObjects[player].BoneDots) do
             boneDot:Remove()
-        end
-        for _, line in pairs(ESPObjects[player].FullBodyLines) do
-            line:Remove()
         end
         ESPObjects[player] = nil  
     end  
